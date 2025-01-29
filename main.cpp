@@ -227,7 +227,7 @@ std::vector<float> boost(
 
 std::vector<float> smooth_clip(std::vector<float> const& samples, int sample_rate, int segment_size){
     //std::cout << "Segment size (SMOOTH): " << segment_size << "\n";
-    constexpr float max_upper_delta = 3.1;
+    constexpr float max_upper_delta = 20;
     constexpr float max_lower_delta = -2.0;
 
     auto y_values = get_segment_volumes(samples, sample_rate, segment_size);
