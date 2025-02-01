@@ -1,7 +1,9 @@
 #include <sndfile.hh>
 #include <iostream>
+#include <sstream>
 #include <vector>
 #include <algorithm>
+#include <numeric>
 #include <cmath>
 #include <cassert>
 
@@ -147,7 +149,26 @@ struct Spline{
         x_values.push_back(x);
         y_values.push_back(y);
     }
-
+    void set_point(int idx, float x, float y){
+        if(idx >= x_values.size())
+            throw std::runtime_error("Index out of bounds");
+        x_values[idx] = x;
+        y_values[idx] = y;
+    }
+    std::pair<float, float> get_point(int idx) const{
+        if(idx >= x_values.size())
+            throw std::runtime_error("Index out of bounds");
+        return {x_values.at(idx), y_values.at(idx)};
+    }
+    size_t size() const {
+        return x_values.size();
+    }
+    std::string to_string() const {
+        std::stringstream ret;        
+        for(int i = 0; i < x_values.size(); ++i)
+            ret << '(' << x_values[i] << ", " << y_values[i]<< "), ";
+        return ret.str();
+    }
 };
 bool vol_in_range(float vol, float avg, float up_d_max, float low_d_max){
         auto delta = vol - avg;
@@ -167,6 +188,49 @@ Spline interp_segments_in_range(std::vector<float> const& segments, float avg_vo
     return ret;
 };
 
+Spline interp_peaks(std::vector<float> const& segments, float avg_volume){
+    Spline ret;
+    ret.add_point(0, -70);
+
+    // We store peaks (first derivative changes its sign from + to -)
+    for (int i = 1; i < segments.size()-1; ++i){
+        // prev d
+        auto prev = segments[i] - segments[i-1];
+        auto next = segments[i+1] - segments[i];
+        if(prev > 0 && next < 0 && segments[i] > avg_volume)
+            ret.add_point(i, segments[i]);
+    }
+    // We do not have a segment of complete silence and nothing else
+    if(segments.size() > 2){
+        auto [first_x, first_y] = ret.get_point(1);
+        auto [last_x, last_y] = ret.get_point(ret.size() - 2);
+        ret.set_point(0, first_x, first_y);
+        ret.add_point(segments.size() - 1, last_y);
+    }
+    return ret;
+}
+
+Spline abs_peak(std::vector<float> const& segments, float threshold){
+    Spline ret;
+    auto max_y = *std::max(std::begin(segments), std::end(segments));
+    std::vector<float> tmp(std::begin(segments), std::end(segments));
+    std::sort(std::begin(tmp), std::end(tmp), std::greater<float>());
+    auto tenth_percentile = std::accumulate(
+        std::begin(tmp), 
+        std::begin(tmp) + tmp.size()/10, 
+        0
+    ) / (tmp.size() / 10.0);
+    // std::cout << tenth_percentile << "\n";
+
+    // std::cout << "Max volume: " << max_y << " threshold: " << threshold << "\n";
+    for(int i = 0; i < segments.size(); ++i)
+        if(segments[i] < threshold)
+            ret.add_point(i, segments[i]);
+        else
+            ret.add_point(i, tenth_percentile);
+    return ret;
+}
+
 // TODO: analytical solution
 std::vector<float> numeric_approx(std::vector<float> sample, float target_lufs, int sample_rate, int segment_size){
     auto current_lufs = calculate_lufs_with_gating(sample, sample_rate, segment_size);
@@ -177,7 +241,7 @@ std::vector<float> numeric_approx(std::vector<float> sample, float target_lufs, 
         for(auto& i : sample)
             i *= skip;
         current_lufs = calculate_lufs_with_gating(sample, sample_rate, segment_size);
-        std::cout << current_lufs<< " " << target_lufs << "\n";
+        // std::cout << current_lufs<< " " << target_lufs << "\n";
         tmp *= mul;
     }
     return sample;
@@ -195,8 +259,10 @@ std::vector<float> boost(
     std::vector<float> ret(std::begin(samples), std::end(samples));
     auto segment_count = mask.size();
     for(int i = 0; i < segment_count; ++i){
-        if (mask[i])
-            continue;
+        // if (mask[i]){
+        //     std::cout<< i << "th segment skipped \n";
+        //     continue;
+        // }
         // //std::cout << calculate_lufs_with_gating(samples, sample_rate) << " gated lufs\n";
         // //std::cout << calculate_lufs_with_gating(ret, sample_rate) << " ret gated lufs\n";
         size_t sample_offset = i * segment_size;
@@ -205,7 +271,7 @@ std::vector<float> boost(
         auto current_lufs = calculate_lufs_with_gating(std::vector<float>(sample_start, sample_end), sample_rate, segment_size);
         auto target_lufs = spline(static_cast<float>(i)/(segment_count - 1));
         auto last_idx = std::min(sample_offset + segment_size, samples.size()-1);
-        std::cout << "Segment: " << i << "\nTarget LUFS: " << target_lufs << "\nCurrent LUFS: " << current_lufs << "\n";
+        // std::cout << "Segment: " << i << "\nTarget LUFS: " << target_lufs << "\nCurrent LUFS: " << current_lufs << "\n";
         std::vector<float> ret_segment(
                 std::begin(ret) + sample_offset, 
                 std::begin(ret) + last_idx
@@ -213,14 +279,14 @@ std::vector<float> boost(
         auto res = numeric_approx(ret_segment, target_lufs, sample_rate, segment_size);
         for(int j = sample_offset; j < last_idx; ++j)
             ret[j] = res[j - sample_offset]; //std::pow(10, current_lufs - target_lufs);
-        std::cout << "New LUFS: " << calculate_lufs_with_gating(
+        /* std::cout << "New LUFS: " << calculate_lufs_with_gating(
             std::vector<float>(
                 std::begin(ret) + sample_offset, 
                 std::begin(ret) + last_idx
             ), 
             sample_rate, 
             segment_size
-        ) << "\n";
+        ) << "\n";*/
     }
     return ret;
 }
@@ -233,12 +299,15 @@ std::vector<float> smooth_clip(std::vector<float> const& samples, int sample_rat
     auto y_values = get_segment_volumes(samples, sample_rate, segment_size);
     auto avg_volume = calculate_lufs_with_gating(samples, sample_rate, segment_size);
     float relative_threshold = avg_volume - 10;
-    auto spline = interp_segments_in_range(
-        y_values, 
-        avg_volume, 
-        max_upper_delta,
-        max_lower_delta
-    );
+    // auto spline = interp_segments_in_range(
+    //     y_values, 
+    //     avg_volume, 
+    //     max_upper_delta,
+    //     max_lower_delta
+    // );
+    // auto spline = interp_peaks(y_values, avg_volume);
+    auto spline = abs_peak(y_values, relative_threshold);
+    // std::cout << spline.to_string() << "\n";
     // for(int i = 0; i < spline.y_values.size(); ++i)
     //     std::cout << "("<<spline.x_values[i]<< ", " << spline.y_values[i]<<")\n";
     std::vector<bool> mask(y_values.size());
@@ -247,7 +316,7 @@ std::vector<float> smooth_clip(std::vector<float> const& samples, int sample_rat
         std::end(y_values), 
         std::begin(mask), 
         [&](auto&& i){
-            return i < relative_threshold || vol_in_range(i, avg_volume, max_upper_delta, max_lower_delta);
+            return i > relative_threshold; //|| vol_in_range(i, avg_volume, max_upper_delta, max_lower_delta);
         });
 
     return boost(samples, mask, spline, sample_rate, segment_size);
@@ -265,7 +334,7 @@ int main(int argc, char** argv) {
     int sample_rate = f.samplerate();
     // auto overall_loudness = calculate_lufs_with_gating(frames, sample_rate);
     // initial_tests(frames, f.samplerate());
-    auto segment_size = sample_rate / 10;
+    auto segment_size = sample_rate / 40;
     auto overall_loudness = calculate_lufs_with_gating(frames, sample_rate, segment_size);
     // We calculate loudness 
     auto result = smooth_clip(frames, sample_rate, segment_size);
@@ -274,9 +343,7 @@ int main(int argc, char** argv) {
     result_file.write(result.data(), result.size());
     // initial_tests(result, sample_rate);
     auto result_loudness = calculate_lufs_with_gating(result, sample_rate, segment_size);
-    std::cout << overall_loudness << "\n";
-    std::cout << result_loudness << "\n";
+    std::cout << "Original loudness: " << overall_loudness << "\n";
+    std::cout << "Result loudness: " << result_loudness << "\n";
     std::cout << f.channels() << "\n";
-    if(fabs(result_loudness - overall_loudness) > 2)
-        std::cerr << "NOPE\n";
 }
