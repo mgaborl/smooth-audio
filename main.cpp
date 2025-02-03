@@ -212,30 +212,31 @@ Spline interp_peaks(std::vector<float> const& segments, float avg_volume){
 
 Spline abs_peak(std::vector<float> const& segments, float threshold){
     Spline ret;
-    auto max_y = *std::max(std::begin(segments), std::end(segments));
-    auto min_y = *std::min(std::begin(segments), std::end(segments));
-    auto old_dy_range = fabs(max_y - min_y);
-
     std::vector<float> tmp(std::begin(segments), std::end(segments));
     std::sort(std::begin(tmp), std::end(tmp), std::greater<float>());
-    float tenth_percentile = std::accumulate(
-        std::begin(tmp), 
-        std::begin(tmp) + tmp.size()/10, 
-        0
-    ) / (tmp.size() / 10.0);
+    auto max_y = tmp[0];
+    auto min_y = tmp.back();
+    float tenth_percentile = tmp[(tmp.size() / 10.0)];
+    std::cout << "Segments: ";
+    for(auto&& i : segments)
+        std::cout << i << ", ";
+    std::cout << "\n";
+    auto old_dy_range = fabs(max_y - min_y);
+
     auto new_dy_range = fabs(max_y - tenth_percentile);
     auto scaling_factor = new_dy_range/old_dy_range;
     // std::cout << tenth_percentile << "\n";
 
-    // std::cout << "Max volume: " << max_y << " threshold: " << threshold << "\n";
+    std::cout << " Old min volume: " << min_y << " Volume threshold: " << threshold << "\n";
+    std::cout << "New max volume: " << max_y << " New min volume: " << tenth_percentile << "\n";
     for(int i = 0; i < segments.size(); ++i)
-        if(segments[i] < threshold || (segments[i] > tenth_percentile && segments[i] < max_y) )
+        if(segments[i] < threshold || (segments[i] > tenth_percentile && segments[i] < max_y))
             ret.add_point(i, segments[i]);
         else {
             float orig_dist = fabs(segments[i] - min_y)/old_dy_range;
-            float new_volume = orig_dist * scaling_factor + tenth_percentile;
+            float new_volume = tanh(orig_dist * scaling_factor) + tenth_percentile;
             std::cout << "Old volume: " << segments[i] << " New volume: " << new_volume << "\n";
-            ret.add_point(i, new_volume);
+            ret.add_point(i, std::max(new_volume, segments[i]));
         }
     return ret;
 }
@@ -305,7 +306,7 @@ std::vector<float> smooth_clip(std::vector<float> const& samples, int sample_rat
 
     auto y_values = get_segment_volumes(samples, sample_rate, segment_size);
     auto avg_volume = calculate_lufs_with_gating(samples, sample_rate, segment_size);
-    float relative_threshold = avg_volume - 10;
+    float relative_threshold = avg_volume;
     // auto spline = interp_segments_in_range(
     //     y_values, 
     //     avg_volume, 
