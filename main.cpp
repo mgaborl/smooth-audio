@@ -232,7 +232,9 @@ Spline abs_peak(std::vector<float> const& segments, float threshold){
         if(segments[i] < threshold)
             ret.add_point(i, segments[i]);
         else {
-            float new_volume = segments[i] * scaling_factor + tenth_percentile;
+            float orig_dist = fabs(segments[i] - min_y)/old_dy_range;
+            float new_volume = orig_dist * scaling_factor + tenth_percentile;
+            std::cout << "Old volume: " << segments[i] << " New volume: " << new_volume << "\n";
             ret.add_point(i, new_volume);
         }
     return ret;
