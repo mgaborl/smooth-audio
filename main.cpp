@@ -299,14 +299,14 @@ std::vector<float> boost(
     return ret;
 }
 
-std::vector<float> smooth_clip(std::vector<float> const& samples, int sample_rate, int segment_size){
+std::vector<float> smooth_clip(std::vector<float> const& samples, int sample_rate, int segment_size, float relative_threshold){
     //std::cout << "Segment size (SMOOTH): " << segment_size << "\n";
     constexpr float max_upper_delta = 20;
     constexpr float max_lower_delta = -2.0;
 
     auto y_values = get_segment_volumes(samples, sample_rate, segment_size);
     auto avg_volume = calculate_lufs_with_gating(samples, sample_rate, segment_size);
-    float relative_threshold = avg_volume;
+    // float relative_threshold = avg_volume;
     // auto spline = interp_segments_in_range(
     //     y_values, 
     //     avg_volume, 
@@ -333,7 +333,7 @@ std::vector<float> smooth_clip(std::vector<float> const& samples, int sample_rat
 int main(int argc, char** argv) {
     std::vector<std::string> args{argv, argv+argc};
     if (args.size() < 3){
-        std::cout << "Usage: " << args[0] << " [PATH_TO_AUDIO_FILE] [PATH_TO_OUTPUT]\n";
+        std::cout << "Usage: " << args[0] << " [PATH_TO_AUDIO_FILE] [PATH_TO_OUTPUT] [RELATIVE_THRESHOLD=-10]\n";
         return 0;
     }
     SndfileHandle f(args[1]);
@@ -344,8 +344,9 @@ int main(int argc, char** argv) {
     // initial_tests(frames, f.samplerate());
     auto segment_size = sample_rate / 10;
     auto overall_loudness = calculate_lufs_with_gating(frames, sample_rate, segment_size);
+    float relative_threshold = args.size() > 3 ? overall_loudness + std::atoi(args[3].c_str()) : overall_loudness - 10;
     // We calculate loudness 
-    auto result = smooth_clip(frames, sample_rate, segment_size);
+    auto result = smooth_clip(frames, sample_rate, segment_size, relative_threshold);
     std::cout << "Writing " << args[2] << "\n";
     SndfileHandle result_file(args[2], SFM_WRITE, f.format(), f.channels(), sample_rate);
     result_file.write(result.data(), result.size());
