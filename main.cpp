@@ -229,7 +229,7 @@ Spline abs_peak(std::vector<float> const& segments, float threshold){
 
     // std::cout << "Max volume: " << max_y << " threshold: " << threshold << "\n";
     for(int i = 0; i < segments.size(); ++i)
-        if(segments[i] < threshold)
+        if(segments[i] < threshold || (segments[i] > tenth_percentile && segments[i] < max_y) )
             ret.add_point(i, segments[i]);
         else {
             float orig_dist = fabs(segments[i] - min_y)/old_dy_range;
