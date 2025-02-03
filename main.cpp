@@ -213,21 +213,28 @@ Spline interp_peaks(std::vector<float> const& segments, float avg_volume){
 Spline abs_peak(std::vector<float> const& segments, float threshold){
     Spline ret;
     auto max_y = *std::max(std::begin(segments), std::end(segments));
+    auto min_y = *std::min(std::begin(segments), std::end(segments));
+    auto old_dy_range = fabs(max_y - min_y);
+
     std::vector<float> tmp(std::begin(segments), std::end(segments));
     std::sort(std::begin(tmp), std::end(tmp), std::greater<float>());
-    auto tenth_percentile = std::accumulate(
+    float tenth_percentile = std::accumulate(
         std::begin(tmp), 
         std::begin(tmp) + tmp.size()/10, 
         0
     ) / (tmp.size() / 10.0);
+    auto new_dy_range = fabs(max_y - tenth_percentile);
+    auto scaling_factor = new_dy_range/old_dy_range;
     // std::cout << tenth_percentile << "\n";
 
     // std::cout << "Max volume: " << max_y << " threshold: " << threshold << "\n";
     for(int i = 0; i < segments.size(); ++i)
         if(segments[i] < threshold)
             ret.add_point(i, segments[i]);
-        else
-            ret.add_point(i, tenth_percentile);
+        else {
+            float new_volume = segments[i] * scaling_factor + tenth_percentile;
+            ret.add_point(i, new_volume);
+        }
     return ret;
 }
 
@@ -259,10 +266,8 @@ std::vector<float> boost(
     std::vector<float> ret(std::begin(samples), std::end(samples));
     auto segment_count = mask.size();
     for(int i = 0; i < segment_count; ++i){
-        // if (mask[i]){
-        //     std::cout<< i << "th segment skipped \n";
-        //     continue;
-        // }
+        if (!mask[i])
+            continue;
         // //std::cout << calculate_lufs_with_gating(samples, sample_rate) << " gated lufs\n";
         // //std::cout << calculate_lufs_with_gating(ret, sample_rate) << " ret gated lufs\n";
         size_t sample_offset = i * segment_size;
@@ -318,7 +323,7 @@ std::vector<float> smooth_clip(std::vector<float> const& samples, int sample_rat
         [&](auto&& i){
             return i > relative_threshold; //|| vol_in_range(i, avg_volume, max_upper_delta, max_lower_delta);
         });
-
+    std::cout << "Fraction of segments touched: " << 1/(static_cast<float>(mask.size()) / std::count_if(std::begin(mask) , std::end(mask), [](auto&& val) {return !val;})) << "\n";
     return boost(samples, mask, spline, sample_rate, segment_size);
 };
 
@@ -334,7 +339,7 @@ int main(int argc, char** argv) {
     int sample_rate = f.samplerate();
     // auto overall_loudness = calculate_lufs_with_gating(frames, sample_rate);
     // initial_tests(frames, f.samplerate());
-    auto segment_size = sample_rate / 40;
+    auto segment_size = sample_rate / 10;
     auto overall_loudness = calculate_lufs_with_gating(frames, sample_rate, segment_size);
     // We calculate loudness 
     auto result = smooth_clip(frames, sample_rate, segment_size);
