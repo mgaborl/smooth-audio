@@ -6,14 +6,6 @@
 
 namespace smooth_audio {
     namespace detail {
-        float calculate_rms(const std::vector<float>& samples) {
-            float sum = 0.0;
-            for (float sample : samples) {
-                sum += sample * sample;
-            }
-            return std::sqrt(sum / samples.size());
-        }
-        
         std::vector<float> apply_k_weighting(std::vector<float>const& samples, int sample_rate) {
             // High-pass filter constants (from ITU-R BS.1770)
             const float alpha = exp(-2.0 * M_PI * 38.0 / sample_rate);
@@ -38,25 +30,55 @@ namespace smooth_audio {
             }
             return sqrt(sum / (end - start));
         }
-        void apply_adaptive_gain(std::vector<float> &buffer) {
-            double gain = 1.0;  // Persistent gain across segments
+        // Detects where the sample naturally fades out
+        size_t detect_fade_start(const std::vector<float> &buffer, float fade_threshold) {
+            size_t total_samples = buffer.size();
+            size_t window_size = WINDOW_SIZE;
+            double prev_rms = compute_rms_segment(buffer, total_samples - window_size, total_samples);
+            size_t fade_start = total_samples;
+            
+            // Scan backward to find where RMS starts decreasing monotonically until below threshold
+            for (size_t i = total_samples - window_size; i > 0; i -= window_size) {
+                double rms = compute_rms_segment(buffer, i, i + window_size);
+                double dynamic_noise_threshold = std::max(rms * 0.1, NOISE_THRESHOLD);
+                if (rms > prev_rms) {
+                    fade_start = i + window_size;
+                    break;
+                }
+                if (rms < dynamic_noise_threshold) {
+                    fade_start = i;
+                    break;
+                }
+                prev_rms = rms;
+            }
+            return fade_start;
+        }
         
+        // Apply adaptive gain correction with noise gating and fade preservation
+        void apply_adaptive_gain(std::vector<float> &buffer) {
+            float target_rms = detail::compute_rms(buffer);
+            double persistent_gain = 1.0;
+            size_t fade_start = detect_fade_start(buffer, target_rms*0.2);
+            
             for (size_t i = 0; i < buffer.size(); i += WINDOW_SIZE) {
                 size_t end = std::min(i + WINDOW_SIZE, buffer.size());
                 double rms = compute_rms_segment(buffer, i, end);
+                
+                double dynamic_noise_threshold = std::max(rms * 0.1, NOISE_THRESHOLD);
+                double target_gain = (rms > dynamic_noise_threshold) ? (target_rms / rms) : 1.0;
         
-                // Skip gain adjustment for segments below noise threshold
-                if (rms < NOISE_THRESHOLD) {
-                    continue;
-                }
-        
-                double target_gain = (rms > 0) ? (TARGET_RMS / rms) : 1.0;
-        
-                // Gradually transition gain within the segment
                 for (size_t j = i; j < end; ++j) {
-                    gain += (target_gain - gain) * SMOOTHING_FACTOR;
-                    buffer[j] *= gain;
+                    double fade_progress = (double)(j - fade_start) / (buffer.size() - fade_start);
+                    // Gradually reduce gain adjustments after fade start
+                    double fade_factor = (j > fade_start) ? exp(-5.0 * fade_progress) : 1.0;
+                    persistent_gain += (target_gain - persistent_gain) * SMOOTHING_FACTOR * fade_factor;
+                    buffer[j] *= persistent_gain;
                 }
+            }
+        }
+        void apply_gain(std::vector<float>& buffer, float gain) {
+            for (float& sample : buffer) {
+                sample *= gain;
             }
         }
         double compute_rms(const std::vector<float> &buffer) {
@@ -70,11 +92,67 @@ namespace smooth_audio {
         // Apply final gain correction to match original loudness
         void apply_final_normalization(std::vector<float> &buffer, double original_rms) {
             double new_rms = compute_rms(buffer);
-            if (new_rms > 0) {
-                double final_gain = original_rms / new_rms;
-                for (float &sample : buffer) {
-                    sample *= final_gain;
+            double total_rms = 0.0;
+            size_t valid_samples = 0;
+            
+            for (size_t i = 0; i < buffer.size(); i += WINDOW_SIZE) {
+                size_t end = std::min(i + WINDOW_SIZE, buffer.size());
+                double rms = compute_rms_segment(buffer, i, end);
+                double dynamic_noise_threshold = std::max(rms * 0.1, NOISE_THRESHOLD);
+                
+                if (rms >= dynamic_noise_threshold) {
+                    total_rms += rms;
+                    valid_samples++;
                 }
+            }
+            
+            if (valid_samples > 0) {
+                double avg_rms = total_rms / valid_samples;
+                double normalization_gain = new_rms / avg_rms;
+                
+                double rms = compute_rms(buffer);
+                double dynamic_noise_threshold = std::max(rms * 0.1, NOISE_THRESHOLD);
+                for (size_t i = 0; i < buffer.size(); ++i) {
+                    if (compute_rms_segment(buffer, i, i + 1) >= dynamic_noise_threshold)
+                        buffer[i] *= normalization_gain;
+                }
+            }
+        }
+    } // namespace  detail
+    void gain_rider(std::vector<float>& audio_buffer, int num_channels, float target_peak, float gain_smoothing_factor) {
+        // Define a smoothing factor for gain changes
+        static float smoothed_gain = 1.0f;  // Initial gain (no adjustment)
+        
+        // Iterate over the entire audio buffer
+        for (int i = 0; i < audio_buffer.size() / num_channels; ++i) {
+            // Prepare the current buffer for each frame (if stereo or multi-channel)
+            std::vector<float> frame_buffer(num_channels);
+            for (int ch = 0; ch < num_channels; ++ch) {
+                frame_buffer[ch] = audio_buffer[i * num_channels + ch];
+            }
+    
+            // Calculate the peak level of the current signal
+            float current_rms = detail::compute_rms(frame_buffer);
+    
+            if (current_rms < 1e-6f) {
+                continue;
+            }
+
+            // Calculate the gain required to bring the current peak to the target level
+            float target_gain = target_peak / current_rms;  // Avoid division by zero
+    
+            // Apply smoothing to the gain adjustment
+            smoothed_gain += (target_gain - smoothed_gain) * gain_smoothing_factor;
+            float gain_change = smoothed_gain - target_gain;
+            if (std::abs(gain_change) > 0.2)
+                smoothed_gain = target_gain + (gain_change > 0 ? 0.2 : -0.2);
+    
+            // Apply the smoothed gain to the frame buffer
+            detail::apply_gain(frame_buffer, smoothed_gain);
+    
+            // Update the main audio buffer with the adjusted frame
+            for (int ch = 0; ch < num_channels; ++ch) {
+                audio_buffer[i * num_channels + ch] = frame_buffer[ch];
             }
         }
     }
@@ -93,7 +171,7 @@ namespace smooth_audio {
                 weighted_samples.begin() + i, 
                 weighted_samples.begin() + i + block_size
             );
-            block_rms.push_back(detail::calculate_rms(block));
+            block_rms.push_back(detail::compute_rms(block));
         }
     
         // Convert RMS to LUFS and find the loudest block
@@ -129,7 +207,8 @@ namespace smooth_audio {
     }
     void boost_sample(std::vector<float>& buffer){
         double original_rms = detail::compute_rms(buffer);
-        detail::apply_adaptive_gain(buffer);
+        std::cout << original_rms << " original RMS\n";
+        gain_rider(buffer, 1, original_rms, 0.01);
         detail::apply_final_normalization(buffer, original_rms);
     }
 }

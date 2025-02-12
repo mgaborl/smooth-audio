@@ -16,11 +16,11 @@ int main(int argc, char** argv) {
     f.readf(frames.data(), f.frames());
     int sample_rate = f.samplerate();
     auto segment_size = sample_rate / 100;
+    auto original_loudness = smooth_audio::calculate_lufs_with_gating(frames, sample_rate, segment_size);
     smooth_audio::boost_sample(frames);
     std::cout << "Writing " << args[2] << "\n";
     SndfileHandle result_file(args[2], SFM_WRITE, f.format(), f.channels(), sample_rate);
     result_file.write(frames.data(), frames.size());
-    auto original_loudness = smooth_audio::calculate_lufs_with_gating(frames, sample_rate, segment_size);
     auto result_loudness = smooth_audio::calculate_lufs_with_gating(frames, sample_rate, segment_size);
     std::cout << "Original loudness: " << original_loudness << "\n";
     std::cout << "Result loudness: " << result_loudness << "\n";
