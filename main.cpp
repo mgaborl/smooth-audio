@@ -5,7 +5,7 @@
 #include <algorithm>
 
 // Constants
-constexpr size_t WINDOW_SIZE = 1024;  // Window size for RMS calculation
+size_t WINDOW_SIZE = 1024;  // Window size for RMS calculation
 constexpr float MIN_GAIN = 0.1f;      // Minimum gain factor
 constexpr float MAX_GAIN = 10.0f;     // Maximum gain factor
 constexpr float HIGH_PERCENTILE = 0.90f; // 90th percentile (target loudness)ercentile of RMS values
@@ -149,7 +149,7 @@ bool process_wav(const std::string& input_file, const std::string& output_file) 
 // Main function
 int main(int argc, char* argv[]) {
     if (argc < 3) {
-        std::cerr << "Usage: " << argv[0] << " <input_wav> <output_wav>\n";
+        std::cerr << "Usage: " << argv[0] << " <input_wav> <output_wav> <window_size=1024>\n";
         return 1;
     }
 
@@ -159,6 +159,8 @@ int main(int argc, char* argv[]) {
     if (!process_wav(input_file, output_file)) {
         return 1;
     }
+    if (argc >=4 )
+        WINDOW_SIZE = std::atoi(argv[3]);
 
     return 0;
 }
