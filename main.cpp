@@ -71,6 +71,7 @@ std::vector<float> compute_smoothed_gain_envelope(
     size_t tail_start) 
 {
     size_t num_windows = (samples.size() + WINDOW_SIZE - 1) / WINDOW_SIZE;
+    std::cout << "Number of windows: " << num_windows << "\n";
     std::vector<float> gain_values(num_windows);
     std::vector<float> gain_envelope(samples.size(), 1.0f);
 
@@ -83,10 +84,7 @@ std::vector<float> compute_smoothed_gain_envelope(
 
         // Reduce gain progressively in the tail
         if (start >= tail_start) {
-            // float fade_factor = 1.0f - TAIL_REDUCTION_FACTOR * (float(start - tail_start) / (samples.size() - tail_start));
-            // float tmp = std::max(fade_factor, TAIL_REDUCTION_FACTOR*0.01f); // Avoid full silence
             gain = 1; // Avoid full silence
-            // std::cout << gain << "\n";
         }
 
         gain_values[i] = gain;
@@ -135,6 +133,7 @@ bool process_wav(const std::string& input_file, const std::string& output_file) 
     std::cout << "Tail detected at sample index: " << tail_start << " out of " << samples.size() << "\n";
     std::cout << "Adaptive Target RMS: " << target_rms << "\n";
     std::vector<float> gain_envelope = compute_smoothed_gain_envelope(samples, low_rms,  target_rms, tail_start);
+    std::cout << "Number of points in the envelope: " << gain_envelope.size() << "\n";
     apply_gain(samples, gain_envelope);
 
     // Write output file
@@ -152,6 +151,9 @@ int main(int argc, char* argv[]) {
         std::cerr << "Usage: " << argv[0] << " <input_wav> <output_wav> <window_size=1024>\n";
         return 1;
     }
+    if (argc >=4 ) 
+        WINDOW_SIZE = std::atoi(argv[3]);
+    std::cout << "Window size set to: " << WINDOW_SIZE << "\n";
 
     std::string input_file = argv[1];
     std::string output_file = argv[2];
@@ -159,8 +161,7 @@ int main(int argc, char* argv[]) {
     if (!process_wav(input_file, output_file)) {
         return 1;
     }
-    if (argc >=4 )
-        WINDOW_SIZE = std::atoi(argv[3]);
+
 
     return 0;
 }
