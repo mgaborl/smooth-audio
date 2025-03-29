@@ -1,4 +1,5 @@
 #include <iostream>
+#include <cstring>
 #include <vector>
 #include <cmath>
 #include <sndfile.hh>
@@ -10,9 +11,10 @@ constexpr float MIN_GAIN = 0.1f;      // Minimum gain factor
 constexpr float MAX_GAIN = 10.0f;     // Maximum gain factor
 constexpr float HIGH_PERCENTILE = 0.90f; // 90th percentile (target loudness)ercentile of RMS values
 constexpr float LOW_PERCENTILE = 0.20f; // 90th percentile (target loudness)ercentile of RMS values
-constexpr float TAIL_DROP_THRESHOLD = 0.3f; // Relative RMS drop defining the start of the tail
+float TAIL_DROP_THRESHOLD = 0.3f; // Relative RMS drop defining the start of the tail
 constexpr float TAIL_RMS_DROP_FACTOR = 0.5f; // Relative RMS drop defining the start of the tail
 constexpr float TAIL_REDUCTION_FACTOR = .9f; // How much to reduce gain in the tail
+float ATTACK_DELAY_MS = 0.0f; // Skip the first n milliseconds
 
 
 // Function to compute RMS of a block of samples
@@ -68,7 +70,8 @@ std::vector<float> compute_smoothed_gain_envelope(
     const std::vector<float>& samples, 
     float min_rms, 
     float target_rms, 
-    size_t tail_start) 
+    size_t tail_start,
+    size_t sample_rate) 
 {
     size_t num_windows = (samples.size() + WINDOW_SIZE - 1) / WINDOW_SIZE;
     std::cout << "Number of windows: " << num_windows << "\n";
@@ -83,7 +86,7 @@ std::vector<float> compute_smoothed_gain_envelope(
         float gain = (rms < min_rms) ? 1.0f : std::clamp(target_rms / rms, MIN_GAIN, MAX_GAIN);
 
         // Reduce gain progressively in the tail
-        if (start >= tail_start) {
+        if (start >= tail_start || start < ATTACK_DELAY_MS*sample_rate/1000) {
             gain = 1; // Avoid full silence
         }
 
@@ -132,7 +135,7 @@ bool process_wav(const std::string& input_file, const std::string& output_file) 
     std::cout << "Skipping boost below RMS: " << low_rms << "\n";
     std::cout << "Tail detected at sample index: " << tail_start << " out of " << samples.size() << "\n";
     std::cout << "Adaptive Target RMS: " << target_rms << "\n";
-    std::vector<float> gain_envelope = compute_smoothed_gain_envelope(samples, low_rms,  target_rms, tail_start);
+    std::vector<float> gain_envelope = compute_smoothed_gain_envelope(samples, low_rms,  target_rms, tail_start, f.samplerate());
     std::cout << "Number of points in the envelope: " << gain_envelope.size() << "\n";
     apply_gain(samples, gain_envelope);
 
@@ -148,11 +151,19 @@ bool process_wav(const std::string& input_file, const std::string& output_file) 
 // Main function
 int main(int argc, char* argv[]) {
     if (argc < 3) {
-        std::cerr << "Usage: " << argv[0] << " <input_wav> <output_wav> <window_size=1024>\n";
+        std::cerr << "Usage: " << argv[0] << " <input_wav> <output_wav> <window_size=1024> <tail_drop_threshold_percentage=30> <attack_delay_ms=0>\n";
+        if (argc == 2 && strcmp(argv[1], "--help") * strcmp(argv[1], "-h") == 0){
+            std::cout << "Tail drop threshold is defined as (remaining_section_volume)*100/(overall_volume) - the lower it is, the more conservative tail detection gets\n";
+            std::cout << "Attack delay skips the first N milliseconds of the sample (applies no boost)\n";
+        }
         return 1;
     }
     if (argc >=4 ) 
         WINDOW_SIZE = std::atoi(argv[3]);
+    if (argc >=5 ) 
+        TAIL_DROP_THRESHOLD = static_cast<float>(std::atoi(argv[4]))/100;
+    if (argc >=6 ) 
+        ATTACK_DELAY_MS = std::atoi(argv[5]);
     std::cout << "Window size set to: " << WINDOW_SIZE << "\n";
 
     std::string input_file = argv[1];
