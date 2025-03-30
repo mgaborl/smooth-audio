@@ -6,7 +6,7 @@
 #include <algorithm>
 
 // Constants
-size_t WINDOW_SIZE = 1024;  // Window size for RMS calculation
+size_t WINDOW_SIZE = 2048;  // Window size for RMS calculation
 constexpr float MIN_GAIN = 0.1f;      // Minimum gain factor
 constexpr float MAX_GAIN = 10.0f;     // Maximum gain factor
 constexpr float HIGH_PERCENTILE = 0.90f; // 90th percentile (target loudness)ercentile of RMS values
@@ -151,7 +151,7 @@ bool process_wav(const std::string& input_file, const std::string& output_file) 
 // Main function
 int main(int argc, char* argv[]) {
     if (argc < 3) {
-        std::cerr << "Usage: " << argv[0] << " <input_wav> <output_wav> <window_size=1024> <tail_drop_threshold_percentage=30> <attack_delay_ms=0>\n";
+        std::cerr << "Usage: " << argv[0] << " <input_wav> <output_wav> <window_size=2048> <tail_drop_threshold_percentage=30> <attack_delay_ms=0>\n";
         if (argc == 2 && strcmp(argv[1], "--help") * strcmp(argv[1], "-h") == 0){
             std::cout << "Tail drop threshold is defined as (remaining_section_volume)*100/(overall_volume) - the lower it is, the more conservative tail detection gets\n";
             std::cout << "Attack delay skips the first N milliseconds of the sample (applies no boost)\n";
