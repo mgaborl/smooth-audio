@@ -120,7 +120,6 @@ void apply_gain(std::vector<float>& samples, const std::vector<float>& gain_enve
 
 // Function to process WAV file
 bool process_wav(const std::string& input_file, const std::string& output_file) {
-    SF_INFO sfinfo;
     SndfileHandle f(input_file);
 
     std::vector<float> samples(f.frames() * f.channels());

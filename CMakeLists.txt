@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD 20)
 
 add_executable(smooth-audio main.cpp)
 
+target_compile_options(smooth-audio PRIVATE -Wall -Wextra -Wpedantic -Werror)
 target_link_libraries(
         smooth-audio 
         PRIVATE
