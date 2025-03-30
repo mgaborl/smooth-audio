@@ -142,7 +142,7 @@ bool process_wav(const std::string& input_file, const std::string& output_file) 
     // Write output file
     SndfileHandle outfile(output_file, SFM_WRITE, f.format(), f.channels(), f.samplerate());
 
-    outfile.write(samples.data(), f.frames());
+    outfile.write(samples.data(), f.frames()*f.channels());
 
     std::cout << "Processing complete! Output saved to: " << output_file << "\n";
     return true;
